@@ -28,15 +28,160 @@ options(stringsAsFactors = FALSE)
 
 ## Needed libraries
 ```{r libraries, message=FALSE}
+library(ggpubr)
+library(RColorBrewer)
+library(gplots)
+library(reshape2)
 library(dplyr)
 library(ggplot2)
 library(Biostrings)
+library(cowplot)
+library(ggsci)
+
+## creating needed custom functions
+# function to create fasta file from data frame
+.df_to_fasta <- function(sequences_column, sequence_name){
+  if(length(sequences_column) != length(sequence_name)){
+    print("Sequences columng does not have the same length as sequences name")
+  }
+  else {
+    str <- AAStringSet(sequences_column)
+    names(str) <- sequence_name
+  }
+  return(str)
+}
+
 ```
 
 ## Load data
 ```{r message=FALSE, warning=FALSE}
+rabies_seq <- read.csv("../data/rabies_sequences/rabies_VH-sequence-database_AC.csv") %>%
+  mutate(VDJ_aa = sub("\\*","",VDJ_aa))
+
+rabies_1 <- rabies_seq %>% filter(Color.coding == 1)
+rabies_2 <- rabies_seq %>% filter(Color.coding == 2)
+rabies_3 <- rabies_seq %>% filter(Color.coding == 3)
+
+ls_grp <- list(rabies_1,rabies_2, rabies_3)
+
+## saving each group as fasta files for alignment
+for(i in 1:length(ls_grp)){
+  fasta <- .df_to_fasta(sequences_column = ls_grp[[i]][["VDJ_nt"]], sequence_name = ls_grp[[i]][["Sequence.ID"]])
+  writeXStringSet(fasta, paste0("../", result.dir, "nt_group_", i,".fasta"))
+}
+
+all_seq_nt <- .df_to_fasta(sequences_column = rabies_seq$VDJ_nt, sequence_name = rabies_seq$Sequence.ID)
+all_seq_aa <- .df_to_fasta(sequences_column = rabies_seq$VDJ_aa, sequence_name = rabies_seq$Sequence.ID)
+
+
+writeXStringSet(all_seq_nt, paste0("../", result.dir, "nt_all",".fasta"))
+writeXStringSet(all_seq_aa, paste0("../", result.dir, "aa_all",".fasta"))
+
+## Proceeed to igdiscover to run sequences using Gunilla Macaca Mullata as starting database
+
 ```
 
+## Comparing SHM 
+
+```{r}
+## function to add summary to box plot
+stat_box_data <- function(y, upper_limit = max(iris$Sepal.Length) * 1.15) {
+  return( 
+    data.frame(
+      y = 0.95 * upper_limit,
+      label = paste('count =', length(y), '\n',
+                    'mean =', round(mean(y), 1), '\n')
+    )
+  )
+}
+
+## filtered tabs from igdiscover output processing
+filtered <- read.table("../results/2021-10-20/nt_all/final/filtered.tab", sep = "\t", header = T) %>%
+  mutate(Sequence.ID = name)
+
+# joining information from the two different datasets
+merged_info <- left_join(filtered,rabies_seq[1:6]) %>%
+        mutate(Group = plyr::mapvalues(x = Color.coding, from = c(1,2,3), to = c("Group 1", "Group 2", "Group 3")))
+
+## plottings
+merged_info %>% 
+  ggplot(aes(Group, V_SHM, color= Color.coding)) +
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_point() +
+  scale_color_npg()+
+  stat_summary(
+    fun.data = stat_box_data, 
+    geom = "text", 
+    hjust =-.1,
+    vjust = 5.5) + 
+ theme_cowplot()+ 
+  #stat_compare_means(method = "t.test", label.y = 15)+        # Add global annova p-value
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = "Group 3",
+                     label.y = 15)+
+  labs(x = "",y = "% of VH SHM") +
+  theme(legend.position = "none")
+
+ggsave(paste0("../", result.dir, "_v-shm.eps"),
+       width = 17, height = 15, 
+       units = "cm", limitsize = FALSE) 
+```
+
+## V-J pairing
+
+```{r}
+
+for(i in c("Group 1", "Group 2", "Group 3")){
+df_heatmap <- merged_info %>% 
+  filter(Group == i) %>%
+  dplyr::count(V_gene, J_gene, Group) %>% 
+  mutate(freq = n ) %>%
+  #filter(freq > 1) %>%
+  select(-c("Group", "n")) %>%
+  acast(J_gene~V_gene) 
+df_heatmap[is.na(df_heatmap)] <- 0
+
+
+setEPS()
+postscript(paste0("../", result.dir, Sys.Date(), "_", i,"V-J_pairing.eps"))
+heatmap.2(t(df_heatmap), 
+         lwid =  c(3,9),
+         lhei = c(3,13),
+          density.info = "none", 
+          trace = "none",
+        cexRow = .3 ,
+        cexCol = .8,
+        col = colorRampPalette(brewer.pal(8, "Blues"))(25),
+          dendrogram = "none", symkey = FALSE,
+          margins=c(8,14)) 
+dev.off()
+}
+```
+## HCDR3 length comparison
+
+```{r}
+merged_info %>%
+  ggplot(aes(nchar(CDR3_aa), fill = Group)) +
+  geom_histogram(color = "black", bins = 19) +
+   theme_cowplot() +
+    labs(x = "CDR3 aa length", y = "Count", title = "") +
+  scale_fill_npg()+
+  facet_grid(~Group) +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5),
+        strip.background =element_rect(fill="grey95")) 
+
+ggsave(paste0("../", result.dir, "_cdr3-length.eps"),
+       width = 17, height = 15, 
+       units = "cm", limitsize = FALSE) 
+```
+
+```{r}
+clones_1 <- read.table("../results/2021-10-20/clonotypes/1_clonotypes_summary_80.txt", sep = "\t", header = T)
+clones_2 <- read.table("../results/2021-10-20/clonotypes/2_clonotypes_summary_80.txt", sep = "\t", header = T)
+clones_3 <- read.table("../results/2021-10-20/clonotypes/3_clonotypes_summary_80.txt", sep = "\t", header = T)
+
+clones_1
+```
 
 ## Take environment snapshot 
 ```{r}
