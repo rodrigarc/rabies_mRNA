@@ -37,7 +37,9 @@ library(ggplot2)
 library(Biostrings)
 library(cowplot)
 library(ggsci)
-
+library(ggtree)
+library(treeio)
+library(vegan)
 ## creating needed custom functions
 # function to create fasta file from data frame
 .df_to_fasta <- function(sequences_column, sequence_name){
@@ -51,30 +53,40 @@ library(ggsci)
   return(str)
 }
 
+colors <- c("group_1" = "#FF2600", "group_2" = "#008F00", "group_3" = "#011993")
 ```
 
 ## Load data
 ```{r message=FALSE, warning=FALSE}
 rabies_seq <- read.csv("../data/rabies_sequences/rabies_VH-sequence-database_AC.csv") %>%
   mutate(VDJ_aa = sub("\\*","",VDJ_aa))
+filt_1 <- read.table("../results/2021-11-01/sequence_QC_pipeline/group_1/igdiscover_run/final/filtered.tab.gz", header = TRUE, sep = "\t") %>% mutate(VDJ_aa = sub("\\*","",VDJ_aa))
+filt_2 <- read.table("../results/2021-11-01/sequence_QC_pipeline/group_2/igdiscover_run/final/filtered.tab.gz", header = TRUE, sep = "\t") %>% mutate(VDJ_aa = sub("\\*","",VDJ_aa))
+filt_3 <- read.table("../results/2021-11-01/sequence_QC_pipeline/group_3/igdiscover_run/final/filtered.tab.gz", header = TRUE, sep = "\t") %>% mutate(VDJ_aa = sub("\\*","",VDJ_aa))
 
-rabies_1 <- rabies_seq %>% filter(Color.coding == 1)
-rabies_2 <- rabies_seq %>% filter(Color.coding == 2)
-rabies_3 <- rabies_seq %>% filter(Color.coding == 3)
+ls <- list(filt_1,filt_2,filt_3)
+names(ls) <- c("group_1","group_2","group_3")
+merged_df <- data.table::rbindlist(ls,idcol = TRUE)
+#write.table(merged_df, paste0("../", result.dir, "filtered_combined.csv"),row.names = FALSE, quote = FALSE, sep = ",")
+
+
+rabies_1 <- merged_df %>% filter(.id == "group_1")
+rabies_2 <- merged_df %>% filter(.id == "group_2")
+rabies_3 <- merged_df %>% filter(.id == "group_3")
 
 ls_grp <- list(rabies_1,rabies_2, rabies_3)
 
 ## saving each group as fasta files for alignment
 for(i in 1:length(ls_grp)){
-  fasta <- .df_to_fasta(sequences_column = ls_grp[[i]][["VDJ_nt"]], sequence_name = ls_grp[[i]][["Sequence.ID"]])
-  writeXStringSet(fasta, paste0("../", result.dir, "nt_group_", i,".fasta"))
+  fasta <- .df_to_fasta(sequences_column = ls_grp[[i]][["VDJ_aa"]], sequence_name = ls_grp[[i]][["name"]])
+  writeXStringSet(fasta, paste0("../", result.dir, "aa_group_", i,".fasta"))
 }
 
-all_seq_nt <- .df_to_fasta(sequences_column = rabies_seq$VDJ_nt, sequence_name = rabies_seq$Sequence.ID)
-all_seq_aa <- .df_to_fasta(sequences_column = rabies_seq$VDJ_aa, sequence_name = rabies_seq$Sequence.ID)
+#all_seq_nt <- .df_to_fasta(sequences_column = rabies_seq$VDJ_nt, sequence_name = rabies_seq$Sequence.ID)
+all_seq_aa <- .df_to_fasta(sequences_column = merged_df$VDJ_aa, sequence_name = merged_df$name)
 
 
-writeXStringSet(all_seq_nt, paste0("../", result.dir, "nt_all",".fasta"))
+#writeXStringSet(all_seq_nt, paste0("../", result.dir, "nt_all",".fasta"))
 writeXStringSet(all_seq_aa, paste0("../", result.dir, "aa_all",".fasta"))
 
 ## Proceeed to igdiscover to run sequences using Gunilla Macaca Mullata as starting database
@@ -82,6 +94,26 @@ writeXStringSet(all_seq_aa, paste0("../", result.dir, "aa_all",".fasta"))
 ```
 
 ## Comparing SHM 
+
+### Normality distribution
+
+```{r}
+## Quantile-quantile plots to evaluate theoretical vs observed quantile data
+merged_df %>%
+  ggplot(aes(sample = V_SHM, color = .id)) +
+  stat_qq() + stat_qq_line() +
+  facet_grid(~.id) +
+  theme_bw()+
+  theme(legend.position = "none") +
+  scale_color_manual(values = colors) 
+
+shapiro.test(merged_df[merged_df$.id == "group_1", V_SHM])
+shapiro.test(merged_df[merged_df$.id == "group_2", V_SHM])
+shapiro.test(merged_df[merged_df$.id == "group_3", V_SHM])
+
+```
+
+### Somatic hypermutations between groups
 
 ```{r}
 ## function to add summary to box plot
@@ -104,11 +136,11 @@ merged_info <- left_join(filtered,rabies_seq[1:6]) %>%
         mutate(Group = plyr::mapvalues(x = Color.coding, from = c(1,2,3), to = c("Group 1", "Group 2", "Group 3")))
 
 ## plottings
-merged_info %>% 
-  ggplot(aes(Group, V_SHM, color= Color.coding)) +
+merged_df %>% 
+  ggplot(aes(.id, V_SHM, color= .id)) +
   geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
   geom_point() +
-  scale_color_npg()+
+  scale_color_manual(values = colors)+
   stat_summary(
     fun.data = stat_box_data, 
     geom = "text", 
@@ -116,8 +148,8 @@ merged_info %>%
     vjust = 5.5) + 
  theme_cowplot()+ 
   #stat_compare_means(method = "t.test", label.y = 15)+        # Add global annova p-value
-  stat_compare_means(label = "p.signif", method = "t.test", ref.group = "Group 3",
-                     label.y = 15)+
+ stat_compare_means(label = "p.signif", method = "wilcox.test", ref.group = "group_3",
+                     label.y = 15, p.adjust = "bonferroni")+
   labs(x = "",y = "% of VH SHM") +
   theme(legend.position = "none")
 
@@ -129,6 +161,17 @@ ggsave(paste0("../", result.dir, "_v-shm.eps"),
 ## V-J pairing
 
 ```{r}
+database_v <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/V.fasta")
+database_j <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/J.fasta")
+
+dist_v <- stringDist(database_v,method = "levenshtein",diag = FALSE, upper = FALSE)
+hclust_avg <- hclust(dist_v, method = 'average')
+plot(hclust_avg)
+
+names_v <- sub("\\*.*","",names(database_v))
+names_J <- unique(sub("-.*|\\*.*","",names(database_j)))
+unique(names_v)
+
 
 for(i in c("Group 1", "Group 2", "Group 3")){
 df_heatmap <- merged_info %>% 
@@ -140,9 +183,12 @@ df_heatmap <- merged_info %>%
   acast(J_gene~V_gene) 
 df_heatmap[is.na(df_heatmap)] <- 0
 
+pal <- colorRampPalette(brewer.pal(9,"Blues"))
 
 setEPS()
 postscript(paste0("../", result.dir, Sys.Date(), "_", i,"V-J_pairing.eps"))
+heatmap.2(df_heatmap, scale = "row", col = pal(4), margins = c(9,11), trace = "none") 
+
 heatmap.2(t(df_heatmap), 
          lwid =  c(3,9),
          lhei = c(3,13),
@@ -150,7 +196,7 @@ heatmap.2(t(df_heatmap),
           trace = "none",
         cexRow = .3 ,
         cexCol = .8,
-        col = colorRampPalette(brewer.pal(8, "Blues"))(25),
+        col = hcl.colors(25),
           dendrogram = "none", symkey = FALSE,
           margins=c(8,14)) 
 dev.off()
@@ -159,13 +205,13 @@ dev.off()
 ## HCDR3 length comparison
 
 ```{r}
-merged_info %>%
-  ggplot(aes(nchar(CDR3_aa), fill = Group)) +
+merged_df %>%
+  ggplot(aes(nchar(CDR3_aa), fill = .id)) +
   geom_histogram(color = "black", bins = 19) +
    theme_cowplot() +
     labs(x = "CDR3 aa length", y = "Count", title = "") +
-  scale_fill_npg()+
-  facet_grid(~Group) +
+  scale_fill_manual(values = colors)+
+  facet_grid(~.id) +
   theme(legend.position = "none",
         plot.title = element_text(hjust = 0.5),
         strip.background =element_rect(fill="grey95")) 
@@ -175,12 +221,130 @@ ggsave(paste0("../", result.dir, "_cdr3-length.eps"),
        units = "cm", limitsize = FALSE) 
 ```
 
-```{r}
-clones_1 <- read.table("../results/2021-10-20/clonotypes/1_clonotypes_summary_80.txt", sep = "\t", header = T)
-clones_2 <- read.table("../results/2021-10-20/clonotypes/2_clonotypes_summary_80.txt", sep = "\t", header = T)
-clones_3 <- read.table("../results/2021-10-20/clonotypes/3_clonotypes_summary_80.txt", sep = "\t", header = T)
+## Plotting trees 
 
-clones_1
+```{r}
+
+ls <- list.files("../results/2021-11-01/trees", full.names = T)
+trees <- lapply(ls, treeio::read.tree)
+names(trees) <- lapply(ls, function (x) strsplit(x, "/")[[1]][[5]])
+
+
+
+colors_tree <- c("Ref. Site I" = "#FF40FF", "Ref. Site III" = "#00E9EB",
+                 "Group 1" = "#FF2600", "Group 2" = "#008F00", "Group 3" = "#011993")
+
+colors_tree_2 <- c("Ref. Site I" = "#FF40FF", "Ref. Site III" = "#00E9EB",
+                 "High SHM" = "#000000", 
+                 "Medium SHM" = "#898989",
+                 "Low SHM" = "#C8C8C8")
+
+rabies_df <- rabies_seq %>%
+  mutate(.id = ifelse(grepl("Ref", Group), Group, paste0("Group ", Group)),
+         name = Sequence.ID,
+         site = ifelse(grepl("Ref", Group), Group, 
+                       ifelse(grepl("Med", mAb), "Medium SHM",
+                              ifelse(grepl("High", mAb), "High SHM",
+                              ifelse(grepl("Low", mAb), "Low SHM", ""))))) %>%
+  select(name,.id, mAb, site) %>%
+  as.data.frame()
+rownames(rabies_df) <- rabies_df[,"name"]
+
+for(i in seq_along(trees)){
+  tree <- ggtree(trees[[i]]) %<+% rabies_df +
+    geom_tiplab(aes(label = mAb), align = TRUE) + 
+    geom_treescale()
+  
+  tree <- gheatmap(tree, rabies_df[".id"], width = .1, offset = .1) +
+    scale_fill_manual(values = colors_tree)
+  tree
+  
+  ggsave(plot = tree, filename = paste0("../", result.dir,Sys.Date(),names(trees)[[i]], ".pdf"), width = 15, height = 29)
+
+  # to create slanted trees as well
+  
+  tree_2 <- ggtree(trees[[i]], layout = "equal_angle") %<+% rabies_df +
+    geom_tiplab(aes(label = mAb), hjust = -.1) + 
+    geom_tippoint(aes(color = site), size = 4) +
+    scale_color_manual(values = colors_tree_2, na.value = "#ffffff00")+
+    geom_treescale() +
+    labs(color = "") +
+    theme_tree(text=element_text(family = "Helvetica"))
+  
+  ggsave(plot = tree_2, filename = paste0("../", result.dir,Sys.Date(),names(trees)[[i]], "slanted_tree.pdf"),device = "pdf", width = 20, height = 20)
+}
+
+
+```
+## Clonotype diversity and richness
+
+### Chao1 and ACE: species richness 
+
+Diversity estimation using ```vegan``` package
+
+```{r warning=FALSE, message=FALSE}
+
+
+chaox100 <- function(x){
+  replicate(100, {
+  subsample <-  rrarefy(x,min(rowSums(x)))
+  chao <- estimateR(subsample)
+  return(chao)
+})}
+
+
+clone_size <- t(as.matrix(read.csv("../data/clonotypes_summary/clonotypes_size.csv")))
+clone_size[is.na(clone_size)] <- 0
+
+chao_clones <- chaox100(clone_size)
+chao_clones_list <- lapply(asplit(chao_clones,1),t)
+
+s.obs_clone <- as.data.frame((chao_clones_list$S.obs))
+s.chao_clone  <- as.data.frame((chao_clones_list$S.chao1))
+s.ace_clone <- as.data.frame((chao_clones_list$S.ACE))
+chao <- estimateR(clone_size)
+
+colors <- c("Group 1" = "#FF2600", "Group 2" = "#008F00", "Group 3"= "#011993")
+
+g1 <- melt(s.obs_clone) %>%
+  mutate(variable = sub(pattern = "group_", replacement = "Group ", x = variable)) %>%
+  ggplot(aes(variable,value, fill = variable)) +
+  geom_boxplot() +
+  #stat_compare_means(label = "p.signif", method = "wilcox.test", ref.group = "group_3",
+   #                  label.y = 2500, p.adjust = "bonferroni") +
+  theme_cowplot(font_size = 12,line_size = 2, rel_small = 2, rel_large = 2,rel_tiny = 2) +
+  scale_fill_manual(values = colors) +
+  labs(y = "Clonotypes observed", x ="") +
+  theme(legend.position = "none",
+        axis.title.y = element_text(face = 2, size = 20))
+g1
+ggsave(g1,filename = paste0("../", result.dir,"observed_species.pdf"),device = "pdf", width = 10, height = 10)
+
+g2 <- melt(s.chao_clone) %>%
+  mutate(variable = sub(pattern = "group_", replacement = "Group ", x = variable)) %>%
+  ggplot(aes(variable,value, fill = variable)) +
+  geom_boxplot() +
+  #stat_compare_means(label = "p.signif", method = "wilcox.test", ref.group = "group_3",
+   #                  label.y = 2500, p.adjust = "bonferroni") +
+  theme_cowplot(font_size = 12,line_size = 2, rel_small = 2, rel_large = 2,rel_tiny = 2) +
+  scale_fill_manual(values = colors) +
+  labs(y = "Clonotype richness estimator (Chao 1)", x ="") +
+  theme(legend.position = "none",
+        axis.title.y = element_text(face = 2, size = 20))
+g2
+ggsave(g2,filename = paste0("../", result.dir,"estimated_species.pdf"),device = "pdf", width = 10, height = 10)
+```
+
+## iNEXT (INterpolation and EXTrapolation): rarefraction and extrapolation of species diversity
+
+```{r warning=FALSE, message=FALSE}
+library(iNEXT)
+
+data(spider)
+rowname()
+inext_obj <- iNEXT(t(clone_size),q=c(0,1,2), datatype = "abundance")
+
+ggiNEXT(inext_obj, type=2, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  
 ```
 
 ## Take environment snapshot 
