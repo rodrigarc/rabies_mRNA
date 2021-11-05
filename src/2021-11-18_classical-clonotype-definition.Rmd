@@ -340,11 +340,79 @@ ggsave(g2,filename = paste0("../", result.dir,"estimated_species.pdf"),device = 
 ```{r warning=FALSE, message=FALSE}
 library(iNEXT)
 
-data(spider)
-rowname()
-inext_obj <- iNEXT(t(clone_size),q=c(0,1,2), datatype = "abundance")
+rownames(clone_size) <- c("Group 1", "Group 2", "Group 3")
 
-ggiNEXT(inext_obj, type=2, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  
+for(i in seq(3)-1){
+  print(i)
+inext_obj <- iNEXT(t(clone_size),q=c(i), datatype = "abundance")
+
+  if(i == 0){
+    ggiNEXT(inext_obj, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  +
+     theme_cowplot() +
+      ggtitle("Species richness (Chao1)") +
+      scale_color_manual(values = colors) +
+      scale_fill_manual(values=colors)+
+  theme(plot.title = element_text(hjust = 0.5, size = 28),
+        axis.title = element_text(face = "bold", size = 24),
+        axis.text = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 2),
+        axis.ticks = element_line(size = 2),
+        legend.text = element_text(face = "bold", size = 24))
+
+
+      ggsave(filename = paste0("../", result.dir,"species_richness.pdf"),device = "pdf", width = 10, height = 8)
+  }
+  if(i == 1){
+    ggiNEXT(inext_obj, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  +
+      theme_cowplot() +
+      ggtitle("Shannon diversity") +
+      scale_color_manual(values = colors) +
+      scale_fill_manual(values=colors) +
+  theme(plot.title = element_text(hjust = 0.5, size = 28),
+        axis.title = element_text(face = "bold", size = 24),
+        axis.text = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 2),
+        axis.ticks = element_line(size = 2),
+        legend.text = element_text(face = "bold", size = 24))
+
+
+      ggsave(filename = paste0("../", result.dir,"shannon_diversity.pdf"),device = "pdf", width = 10, height = 8)
+  }
+  if(i == 2){
+    ggiNEXT(inext_obj, type=1, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  +
+      theme_cowplot() +
+      ggtitle("Simpson diversity") +
+      scale_color_manual(values = colors) +
+      scale_fill_manual(values=colors)+
+  theme(plot.title = element_text(hjust = 0.5, size = 28),
+        axis.title = element_text(face = "bold", size = 24),
+        axis.text = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 2),
+        axis.ticks = element_line(size = 2),
+        legend.text = element_text(face = "bold", size = 24))
+
+
+      ggsave(filename = paste0("../", result.dir,"simpson_diversity.pdf"),device = "pdf", width = 10, height = 8)
+  }
+}
+
+
+inext_obj <- iNEXT(t(clone_size),q=c(0), datatype = "abundance")
+
+ggiNEXT(inext_obj, type=2, se=TRUE, facet.var="none", color.var="site", grey=FALSE)  +
+  theme_cowplot() +
+  ggtitle("Sample coverage") +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values=colors) +
+  theme(plot.title = element_text(hjust = 0.5, size = 28),
+        axis.title = element_text(face = "bold", size = 24),
+        axis.text = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 2),
+        axis.ticks = element_line(size = 2),
+        legend.text = element_text(face = "bold", size = 24))
+
+ggsave(filename = paste0("../", result.dir,"sample_coverage.pdf"),device = "pdf", width = 10, height = 8)
+
 ```
 
 ## Take environment snapshot 
