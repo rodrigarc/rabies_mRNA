@@ -135,6 +135,12 @@ filtered <- read.table("../results/2021-10-20/nt_all/final/filtered.tab", sep = 
 merged_info <- left_join(filtered,rabies_seq[1:6]) %>%
         mutate(Group = plyr::mapvalues(x = Color.coding, from = c(1,2,3), to = c("Group 1", "Group 2", "Group 3")))
 
+#comparing means,showing that the comparison using BH correction is significant by kruskal.test
+kruskal.test(V_SHM ~ .id,  data = merged_df)
+#doing multiple comparisons afterwards, correcting by BH aka False Discovery Rate p.adjust.method, comparing all to the reference group. Both significant after adjustments
+
+compare_means(V_SHM ~ .id,  data = merged_df, ref.group = "group_3", p.adjust.method = "BH")
+
 ## plottings
 merged_df %>% 
   ggplot(aes(.id, V_SHM, color= .id)) +
@@ -148,8 +154,8 @@ merged_df %>%
     vjust = 5.5) + 
  theme_cowplot()+ 
   #stat_compare_means(method = "t.test", label.y = 15)+        # Add global annova p-value
- stat_compare_means(label = "p.signif", method = "wilcox.test", ref.group = "group_3",
-                     label.y = 15, p.adjust = "bonferroni")+
+ stat_compare_means(method = "kruskal.test",
+                     label.y = 15)+
   labs(x = "",y = "% of VH SHM") +
   theme(legend.position = "none")
 
