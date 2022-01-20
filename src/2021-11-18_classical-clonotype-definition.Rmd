@@ -170,44 +170,89 @@ ggsave(paste0("../", result.dir, "_v-shm.eps"),
 database_v <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/V.fasta")
 database_j <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/J.fasta")
 
-dist_v <- stringDist(database_v,method = "levenshtein",diag = FALSE, upper = FALSE)
-hclust_avg <- hclust(dist_v, method = 'average')
-plot(hclust_avg)
-
-names_v <- sub("\\*.*","",names(database_v))
-names_J <- unique(sub("-.*|\\*.*","",names(database_j)))
-unique(names_v)
-
+names_v <- unique(sub("\\*.*| ","",names(database_v)))
+names_j <- unique(sub("\\*.*| ","",names(database_j)))
+empty_matrix <- matrix(nrow = length(names_j), ncol = length(names_v))
+colnames(empty_matrix) <- names_v
+rownames(empty_matrix) <- names_j
 
 for(i in c("Group 1", "Group 2", "Group 3")){
-df_heatmap <- merged_info %>% 
-  filter(Group == i) %>%
-  dplyr::count(V_gene, J_gene, Group) %>% 
-  mutate(freq = n ) %>%
-  #filter(freq > 1) %>%
-  select(-c("Group", "n")) %>%
-  acast(J_gene~V_gene) 
-df_heatmap[is.na(df_heatmap)] <- 0
+  
+  df_heatmap <- merged_info %>% 
+    filter(Group == i) %>%
+      mutate(J_gene = sub("\\*.*| ","",J_gene),
+           V_gene = sub("\\*.*| ","", V_gene)) %>%
+    dplyr::count(V_gene, J_gene, Group) %>%
+    mutate(freq = n/sum(n)*100) %>%
+    #filter(freq > 1) %>%
+    select(-c("Group", "n")) %>%
+    acast(J_gene~V_gene) 
 
-pal <- colorRampPalette(brewer.pal(9,"Blues"))
+    # filling up empty matrix 
+  cols <- colnames(empty_matrix)[colnames(empty_matrix) %in% colnames(df_heatmap)]
+  rows <- rownames(empty_matrix)[rownames(empty_matrix) %in% rownames(df_heatmap)]
 
-setEPS()
-postscript(paste0("../", result.dir, Sys.Date(), "_", i,"V-J_pairing.eps"))
-heatmap.2(df_heatmap, scale = "row", col = pal(4), margins = c(9,11), trace = "none") 
+  empty_matrix[rows, cols] <- df_heatmap[rows, cols]
+  heatmap_data <- empty_matrix
 
-heatmap.2(t(df_heatmap), 
-         lwid =  c(3,9),
-         lhei = c(3,13),
-          density.info = "none", 
-          trace = "none",
-        cexRow = .3 ,
-        cexCol = .8,
-        col = hcl.colors(25),
-          dendrogram = "none", symkey = FALSE,
-          margins=c(8,14)) 
+  heatmap_data[is.na(heatmap_data)] <- 0
+
+  setEPS()
+  postscript(paste0("../", result.dir, Sys.Date(), "_", i,"V-J_pairing.eps"))
+
+
+  heatmap.2(heatmap_data, 
+           lwid =  c(0.5,2),
+           lhei = c(1,2),
+           density.info = "none",
+           trace = "none",
+           cexRow = .8,
+           cexCol = .3,
+           col = viridis::mako(99, direction = -1, begin = 0),
+           dendrogram = "none",
+           symkey = FALSE,
+           margins=c(5,4),
+           breaks = 100) 
 dev.off()
 }
+
+
+names_v <- names(database_v)
+names_j <- unique(sub("\\*.*| ","",names(database_j)))
+
+empty_matrix <- matrix(nrow = length(names_j), ncol = length(names_v))
+colnames(empty_matrix) <- names_v
+rownames(empty_matrix) <- names_j
+
+
+df_heatmap <- merged_info %>% 
+  mutate(J_gene = sub("\\*.*| ","",J_gene)) %>%
+     # mutate(J_gene = sub("\\*.*| ","",J_gene),
+      #     V_gene = sub("\\*.*| ","", V_gene)) %>%
+    dplyr::count(V_gene, J_gene, Group) %>%
+    mutate(freq = n/sum(n)*100)
+
+
+expand.grid(names_v,names_j) %>%
+  as.data.frame() %>%
+  dplyr::rename(V_gene = Var1, J_gene = Var2) %>%
+  full_join(df_heatmap) %>%
+  na.omit() %>%
+  mutate(V_gene_family = substr(V_gene, 1,5)) %>%
+  ggplot(aes(V_gene, J_gene, fill = freq)) +
+  geom_tile(color = "black") +
+  scale_fill_viridis_c(option = "viridis", direction = 1)+
+  theme(axis.text.x = element_text(angle = 90, size = 4, hjust = 1, vjust = 0.5, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        strip.background = element_rect(color="black", fill="grey90", size=.8, linetype="solid"),
+        panel.background = element_rect(fill = "grey98", colour = NA),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())+
+  labs(x = "IGHV genes", y = "IGHJ genes",  fill = "V-J pairing\nfrequency (%)") +
+  facet_wrap(~Group, ncol = 1)
+
 ```
+
 ## HCDR3 length comparison
 
 ```{r}
