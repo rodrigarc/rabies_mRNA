@@ -166,6 +166,10 @@ ggsave(paste0("../", result.dir, "_v-shm.eps"),
 
 ## V-J pairing
 
+### First heatmap
+
+Plotting only counts, not accounting for number of sequences sequenced. Heatmaps not wrapped together, thus with different symm breaks scales.
+
 ```{r}
 database_v <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/V.fasta")
 database_j <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/J.fasta")
@@ -183,7 +187,7 @@ for(i in c("Group 1", "Group 2", "Group 3")){
       mutate(J_gene = sub("\\*.*| ","",J_gene),
            V_gene = sub("\\*.*| ","", V_gene)) %>%
     dplyr::count(V_gene, J_gene, Group) %>%
-    mutate(freq = n/sum(n)*100) %>%
+    mutate(freq = n) %>%
     #filter(freq > 1) %>%
     select(-c("Group", "n")) %>%
     acast(J_gene~V_gene) 
@@ -215,10 +219,14 @@ for(i in c("Group 1", "Group 2", "Group 3")){
            breaks = 100) 
 dev.off()
 }
+```
 
+### Second heatmap
 
-names_v <- names(database_v)
-names_j <- unique(sub("\\*.*| ","",names(database_j)))
+Account for number of sequences (V-J pairing percentage %), plots wrapped together for easier comprehession, V genes maintained. 
+
+```{r}
+
 
 empty_matrix <- matrix(nrow = length(names_j), ncol = length(names_v))
 colnames(empty_matrix) <- names_v
@@ -226,30 +234,34 @@ rownames(empty_matrix) <- names_j
 
 
 df_heatmap <- merged_info %>% 
-  mutate(J_gene = sub("\\*.*| ","",J_gene)) %>%
-     # mutate(J_gene = sub("\\*.*| ","",J_gene),
-      #     V_gene = sub("\\*.*| ","", V_gene)) %>%
+     mutate(J_gene = sub("\\*.*| ","",J_gene),
+           V_gene = sub("\\*.*| ","", V_gene)) %>%
     dplyr::count(V_gene, J_gene, Group) %>%
     mutate(freq = n/sum(n)*100)
 
 
-expand.grid(names_v,names_j) %>%
+expand.grid(names_v,names_j, c("Group 1", "Group 2", "Group 3")) %>%
   as.data.frame() %>%
-  dplyr::rename(V_gene = Var1, J_gene = Var2) %>%
+  dplyr::rename(V_gene = Var1, J_gene = Var2, Group = Var3) %>%
   full_join(df_heatmap) %>%
-  na.omit() %>%
+  tidyr::replace_na(list(freq = 0, n = 0)) %>%
   mutate(V_gene_family = substr(V_gene, 1,5)) %>%
   ggplot(aes(V_gene, J_gene, fill = freq)) +
   geom_tile(color = "black") +
   scale_fill_viridis_c(option = "viridis", direction = 1)+
-  theme(axis.text.x = element_text(angle = 90, size = 4, hjust = 1, vjust = 0.5, face = "bold"),
-        axis.text.y = element_text(face = "bold"),
+  theme(axis.text.x = element_text(angle = 90, size = 7, hjust = 1, vjust = 0.5, face = "bold", colour = "black"),
+        axis.text.y = element_text(face = "bold", colour = "black"),
         strip.background = element_rect(color="black", fill="grey90", size=.8, linetype="solid"),
-        panel.background = element_rect(fill = "grey98", colour = NA),
+        strip.text = element_text(face = "bold"),
         panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank())+
-  labs(x = "IGHV genes", y = "IGHJ genes",  fill = "V-J pairing\nfrequency (%)") +
+        panel.grid.minor = element_blank(),
+        legend.position =  "top")+
+  labs(x = "IGHV genes", y = "IGHJ genes",  fill = "V-J pairing\nfrequency\n(%)") +
   facet_wrap(~Group, ncol = 1)
+
+ggsave(paste0("../", result.dir, "V-J_pairing.pdf"), 
+       dpi = 300, width = 29,height = 15, units = "cm" ,
+       limitsize = FALSE) 
 
 ```
 
@@ -298,7 +310,15 @@ rabies_df <- rabies_seq %>%
                               ifelse(grepl("High", mAb), "High SHM",
                               ifelse(grepl("Low", mAb), "Low SHM", ""))))) %>%
   select(name,.id, mAb, site) %>%
-  as.data.frame()
+  as.data.frame() %>% 
+  left_join(merged_info, by = "name") %>%
+  mutate(V_gene_family = substr(V_gene, 1,5)) %>%
+  select(name, .id, mAB, site, V_gene_family)
+  
+rabies_seq[!rabies_seq$Sequence.ID %in% merged_info$name,]
+  
+rabies_seq$Sequence.ID %in% merged_info$name
+
 rownames(rabies_df) <- rabies_df[,"name"]
 
 for(i in seq_along(trees)){
@@ -318,10 +338,10 @@ for(i in seq_along(trees)){
     geom_tiplab(aes(label = mAb), hjust = -.1) + 
     geom_tippoint(aes(color = site), size = 4) +
     scale_color_manual(values = colors_tree_2, na.value = "#ffffff00")+
-    geom_treescale() +
+    geom_treescale(width = .2) +
     labs(color = "") +
     theme_tree(text=element_text(family = "Helvetica"))
-  
+  tree_2
   ggsave(plot = tree_2, filename = paste0("../", result.dir,Sys.Date(),names(trees)[[i]], "slanted_tree.pdf"),device = "pdf", width = 20, height = 20)
 }
 
