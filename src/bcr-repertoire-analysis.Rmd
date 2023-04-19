@@ -1,0 +1,842 @@
+---
+title: "Unmodified mRNA vaccine encoding rabies virus glycoprotein induces superior immunity over a licensed vaccine in macaques"
+author: "Rodrigo Arcoverde Cerveira"
+date: '`r format(Sys.Date(), "%Y-%m-%d")`'
+output: 
+ html_document:
+    toc: true
+    depth: 2
+    toc_float: true
+    number_sections: true
+ github_document:
+    preview_html: false
+abstract: Here you can find how the processing and plotting related to our B cell receptor clonotype analysis performed for this project.
+knit: (function(inputFile, encoding) {
+          rmarkdown::render(inputFile,
+                            encoding = encoding, 
+                            output_file = paste0(Sys.Date(), "_",
+                              xfun::sans_ext(inputFile), ".html"),
+                                output_dir = "../results/lab_book/")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(echo = TRUE,
+                     root.dir = getwd(),
+                     fig.width = 6, fig.height = 5,
+                     warning = FALSE, 
+                     message = FALSE)
+knitr::opts_chunk$set(echo = TRUE,
+                     warning = FALSE, 
+                     message = FALSE,
+                     fig.align = "center")
+
+result.dir <- paste0("results/",Sys.Date(),"/")
+
+## creates result.dir with date in if not existent
+ifelse(isFALSE(dir.exists(paste0("../",result.dir))), dir.create(paste0("../",result.dir),recursive = TRUE),"Result directory for today exists already!")
+options(stringsAsFactors = FALSE) 
+```
+
+# Needed libraries and custom settings
+
+The chunk of code shown is a setup section for an RMarkdown file. It includes the loading of several libraries necessary for the analysis, such as ggplot2, dplyr, Biostrings, and others. Additionally, it defines a custom function named .df_to_fasta that creates a fasta file from a data frame containing sequences. Finally, it sets the default grouping colors and theme parameters for plots that will be generated in the subsequent sections of the RMarkdown document.
+
+```{r libraries, message=FALSE}
+library(ggpubr)
+library(RColorBrewer)
+library(gplots)
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+library(Biostrings)
+library(cowplot)
+library(ggsci)
+library(ggtree)
+library(treeio)
+library(vegan)
+library(dunn.test)
+library(rstatix)
+library(rjson)
+library(iNEXT)
+library(gridGraphics)
+
+# function to create fasta file from data frame
+.df_to_fasta <- function(sequences_column, sequence_name){
+  if(length(sequences_column) != length(sequence_name)){
+    print("Sequences columng does not have the same length as sequences name")
+  }
+  else {
+    str <- AAStringSet(sequences_column)
+    names(str) <- sequence_name
+  }
+  return(str)
+}
+
+# set default grouping colors
+colors <- c("Group 1" = "#FF2600", "Group 2" = "#008F00", "Group 3" = "#011993")
+
+# theme params
+personal_theme <-
+    ggplot2::theme(
+      axis.title = element_text(size = 24),
+        axis.text = element_text(size = 20, color = "black"),
+        axis.line = element_line(size = 1),
+        axis.ticks = element_line(size = 1),
+        strip.text = element_text(size=15)
+      )
+```
+
+# Load data
+
+Loads various data files, including expressed monoclonal antibodies data, AIRR-compliant processed sequences, metadata, and processed IgG sequencing data, among others.
+
+```{r message=FALSE, warning=FALSE}
+# load expressed mabs data
+mAbs_data <- read.csv("../data/rabies_sequences/mAbs_data.csv") %>%
+  mutate(sequence_alignment_aa = sub("\\*","", sequence_alignment_aa))
+
+# load AIRR-compliant processed sequences
+merged_df <- data.table::fread("../data/processed_data/sanger_sequences/sanger_seq_igdiscover/final/filtered.tsv.gz", quote = FALSE, verbose = FALSE, nThread = 8, fill = TRUE, header = TRUE, sep = "\t") %>%
+  mutate(sequence_alignment_aa = sub("\\*","", sequence_alignment_aa)) %>%
+  tidyr::separate(sequence_id, into = c("animal_ID", "plate", "well", "chain"), remove = FALSE) 
+
+# load metadata
+metadata_group <- read.csv("../data/rabies_sequences/metadata_grouping.csv")
+
+# change plate names to represent timepoints
+merged_df <- left_join(merged_df, metadata_group, by = "animal_ID") %>% 
+  mutate(.id = as.factor(Group),
+         timepoint = factor(case_when(plate %in% sprintf("%02s", seq(4)) ~ "W8",
+                               plate %in% sprintf("%02s", seq(5,12)) ~ "W18"), levels = c("W8", "W18")),
+         Group = plyr::mapvalues(x = Group, from = c(1,2,3), to = c("Group 1", "Group 2", "Group 3"))) 
+
+# load repertoire AIRR-compliant processed IgG sequencing
+ls <- list.files("../data/processed_data/clonoquery/", pattern = "summary.txt", full.names = TRUE)
+ls_names <- unlist(list.files("../data/processed_data/clonoquery/", pattern = "summary", full.names = FALSE))
+names(ls) <- substr(ls_names, 1,3)
+ls <- lapply(ls, read.table, sep = "\t", header = TRUE)
+rep_seq <- data.table::rbindlist(ls, idcol = TRUE) %>% dplyr::rename(animal_ID = .id)
+
+# load single-cell sanger sequences clonotypes
+sc_clonotypes <-
+data.table::fread("../data/processed_data/sanger_sequences/sanger_seq_igdiscover/final/clonotypes_full.txt", sep = "\t", quote = FALSE, header = TRUE, verbose = FALSE, nThread = 8, fill = TRUE) 
+
+# load processed and subsampled (100000 seqs per animal) total IgG repertoire
+tabs_subsample <- data.table::fread("../data/processed_data/rep_seq/subsampled_per_animal.tsv.gz", quote = FALSE, verbose = FALSE, nThread = 8, header = TRUE, sep = "\t")
+
+# load and edit database alleles
+database_v <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/V.fasta")
+database_j <- Biostrings::readDNAStringSet("../data/kimdb_gkhlab_macaca-mulatta/J.fasta")
+names_v <- unique(sub("\\*.*| ","",names(database_v)))
+names_j <- unique(sub("\\*.*| ","",names(database_j)))
+empty_matrix <- matrix(nrow = length(names_j), ncol = length(names_v))
+colnames(empty_matrix) <- names_v
+rownames(empty_matrix) <- names_j
+```
+
+# Save intermediate files
+
+In this chunk, the filtered Sanger sequences are saved for each animal ID, and all sequences including reference mAbs are saved in FASTA format. Additionally, separate FASTA files are created for each of the three groups based on their timepoints, and saved in a phylogenetic tree directory.
+
+```{r intermediate_files}
+
+for(i in unique(merged_df$animal_ID)){
+  merged_df_filt <- merged_df %>% filter(animal_ID == i)
+  data.table::fwrite(merged_df_filt, paste0("../data/processed_data/sanger_sequences/sanger_seq_igdiscover/final/", i, "_filtered.tsv.gz"), sep = "\t")
+}
+
+# save all sequences plus reference mAbs as fastas
+#all_seq_nt <- .df_to_fasta(sequences_column = rabies_seq$VDJ_nt, sequence_name = rabies_seq$Sequence.ID)
+merged_mab_info <- full_join(mAbs_data, merged_df, by = c("sequence_id", "Group", "sequence_alignment", "sequence_alignment_aa"))
+all_seq_aa <- .df_to_fasta(sequences_column = merged_mab_info$sequence_alignment_aa, sequence_name = merged_mab_info$sequence_id)
+
+# save each group as fasta files for alignment
+for(i in c("Group 1", "Group 2","Group 3")){
+  merged_df_filt <- merged_mab_info %>% 
+    filter(grepl("Ref", Group) | grepl(i, Group))
+  fasta <- .df_to_fasta(sequences_column = merged_df_filt[["sequence_alignment_aa"]], sequence_name = merged_df_filt[["sequence_id"]])
+  writeXStringSet(fasta, paste0("../data/phylogenetic_trees/","aa_group_", i,".fasta"))
+}
+
+#writeXStringSet(all_seq_nt, paste0("../", result.dir, "nt_all",".fasta"))
+writeXStringSet(all_seq_aa, paste0("../data/phylogenetic_trees/", "aa_all",".fasta"))
+
+```
+
+# Processing and merging datasets
+
+This code processes and merges datasets by performing various data cleaning and manipulation tasks. It uses functions such as mutate, drop_na, relocate, separate, mapvalues, and group_by, to create new variables, separate columns, map values, group and summarize data. The resulting data sets include clone_summary and rep_seq.
+
+```{r process_merging}
+
+sc_clonotypes <- sc_clonotypes %>%
+  mutate(
+    grp = cumsum(is.na(CDR3_length)),
+  ) %>%
+  tidyr::drop_na(count) %>%
+  dplyr::relocate(grp) %>%
+  tidyr::separate(sequence_id, into = c("ID", "plate", "well", "chain"), remove = FALSE) %>%
+  mutate(vac_group = plyr::mapvalues(ID, from = c("I01","I08","I11","I12","I15", "I02", "I05", "I06","I13", "I17", "I18", "I03", "I07", "I09","I10", "I14", "I16"), to = c("Group 1","Group 1","Group 1","Group 1","Group 1","Group 2","Group 2","Group 2","Group 2","Group 2","Group 2","Group 3","Group 3","Group 3","Group 3","Group 3","Group 3")))
+
+clone_summary <- sc_clonotypes %>%
+  group_by(ID,grp, vac_group) %>%
+  summarise(clone_size = n())
+
+rep_seq <- rep_seq %>%
+  tidyr::separate(name, into = c("animal_ID", "plate", "well", "chain"), remove = FALSE) %>%
+  mutate(sequence_id = name,
+         vac_group = plyr::mapvalues(animal_ID, from = c("I01","I08","I11","I12","I15", "I02", "I05", "I06","I13", "I17", "I18", "I03", "I07", "I09","I10", "I14", "I16"), to = c("Group 1","Group 1","Group 1","Group 1","Group 1","Group 2","Group 2","Group 2","Group 2","Group 2","Group 2","Group 3","Group 3","Group 3","Group 3","Group 3","Group 3")),
+         timepoint = case_when(plate %in% sprintf("%02s", seq(4)) ~ "W8",
+                               plate %in% sprintf("%02s", seq(5,12)) ~ "W18"))
+
+
+```
+
+# Merge clonotype single cells and bulk IgG repertoire sequencing 
+
+This code block joins two datasets, sc_clonotypes and rep_seq, by their sequence_id and vac_group columns. The resulting dataset is summarized by grouping by several columns and calculating various summary statistics using summarise(), such as the total clonal size, average SHM, and timepoint. The resulting dataset is stored in sc_rep_seq_summary.
+
+```{r merged_sc_igg}
+sc_rep_seq <- left_join(sc_clonotypes, rep_seq, by = c("sequence_id", "vac_group")) %>%
+  tidyr::fill(timepoint) %>%
+  mutate(Group = vac_group)
+
+sc_rep_seq_summary <- sc_rep_seq %>%
+  group_by(grp, ID, Group,v_call, j_call) %>%
+  summarise(clonal_size_merged = sum(size, count, na.rm = TRUE),
+            clonal_size_sc = sum(count, na.rm = TRUE),
+            clonal_size_rep_seq = sum(size, na.rm = TRUE),
+            avg_SHM_sc = mean(V_SHM, na.rm = TRUE),
+            avg_SHM_rep_seq = mean(avg_V_SHM, na.rm = TRUE), 
+            avg_SHM_merged = sum(avg_SHM_sc, avg_SHM_rep_seq)/2,
+            timepoint = timepoint) %>%
+  ungroup() %>%
+  distinct(.keep_all = TRUE)
+
+```
+
+# Saving metadata from repseq
+
+This code chunk reads in JSON files generated by IgDiscover (v0.15.1) from a directory, converts them to data frames, combines them, and selects specific columns to create a table of sequencing statistics. It then joins this table with another table created earlier in the code, summarizes the data, and saves it to a TSV file.
+
+```{r repseq_metada}
+rep_seq_ls <- list.files("../data/processed_data/rep_seq", pattern = "stats.json", recursive = TRUE, full.names = TRUE)
+rep_seq_names <- list.files("../data/processed_data/rep_seq", pattern = "stats.json", recursive = TRUE, full.names = FALSE)
+names(rep_seq_ls) <- substr(rep_seq_names, 1,3)
+
+rep_seq_stat <-  lapply(rep_seq_ls, function(x) fromJSON(file = x))
+rep_seq_stat <-  lapply(rep_seq_stat, as.data.frame)
+rep_seq_stat <- data.table::rbindlist(rep_seq_stat, idcol = "ID", fill = TRUE) 
+rep_seq_stat <- rep_seq_stat %>%
+  select(c(ID,read_preprocessing.raw_reads, assignment_filtering.total, assignment_filtering.has_vj_assignment, 17:22))
+
+
+sc_rep_seq_stat <- sc_rep_seq_summary %>% 
+  group_by(ID) %>% 
+  summarise(single_cell_sequences = sum(clonal_size_sc),
+            rep_seq_tracing = sum(clonal_size_rep_seq),
+            single_cell_clonotypes_counts = n())
+
+seq_quality_control <- left_join(sc_rep_seq_stat, rep_seq_stat, by = "ID")
+colnames(seq_quality_control) <- sub("\\.", "_", colnames(seq_quality_control))
+
+write.table(seq_quality_control, "../data/processed_data/summary_sequencing_table.tsv", row.names = FALSE, sep = "\t", quote = FALSE )
+
+```
+
+# Comparing somatic hypermutation on B cell receptors
+
+## Data wrangling
+
+Defines a function `stat_box_data` to add a summary to a box plot, and then joins information from two datasets into `merged_df`, adding a new factor variable `Group_timepoint`.
+
+```{r}
+# function to add summary to box plot
+# change the iris$Sepal.length
+stat_box_data <- function(y, upper_limit = max(iris$Sepal.Length) * 1.15) {
+  return( 
+    data.frame(
+      y = 0.95 * upper_limit,
+      label = paste('count =', length(y), '\n',
+                    'mean =', round(mean(y), 1), '\n')
+    )
+  )
+}
+
+# join information from the two different datasets
+merged_df <- merged_df %>%
+        mutate(Group_timepoint = factor(paste(Group, timepoint, sep = "_"), levels = c("Group 1_W18", "Group 2_W8", "Group 2_W18", "Group 3_W8", "Group 3_W18")))
+
+```
+
+## Somatic hypermutations single-cell dataset
+
+Creates a new dataframe `merged_df_per_animal` by grouping `merged_df` by `animal_ID`, `Group`, and `Group_timepoint` and summarizing the mean of `V_SHM`. It then performs Wilcoxon tests on different groups and timepoints of `merged_df_per_animal` and plots a violin plot using `ggviolin` with the `mean` and the `p.signif` label added to compare different vaccine groups and the same vaccine group but different timepoints. 
+The plot is saved as a PDF.
+
+```{r shm_per_animal_and_time}
+merged_df_per_animal <- merged_df %>%
+  group_by(animal_ID, Group, Group_timepoint) %>%
+  summarise(V_SHM_mean = mean(V_SHM)) %>%
+  ungroup() %>%
+  filter(Group != "Group 1") %>%
+  droplevels()
+
+# Perform wilcox.test paired and unpaired
+# If same group, paired test, if different groups unpaired
+
+wilcox_result <- merged_df_per_animal %>% wilcox_test(V_SHM_mean ~ Group_timepoint, paired = F, comparisons = list(c("Group 2_W8", "Group 2_W18"), c("Group 3_W8", "Group 3_W18"), c("Group 2_W8", "Group 3_W8"), c("Group 2_W18", "Group 3_W18")), p.adjust.method = "BH") %>%
+  add_xy_position(x = "Group_timepoint") 
+
+ggviolin(merged_df_per_animal, x = "Group_timepoint", y = "V_SHM_mean", color = "Group") +
+  stat_summary(fun = "mean",
+               geom = "crossbar", 
+               width = 0.3,
+               colour = "black") +
+  geom_point(position = position_jitter(.1), alpha = 1, size = 3, shape = 21, aes(fill = Group)) +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  # compare different vaccine groups but same timepoint, not-paired wilcox.test, also called Mann-Whitney test. FDR correction for multiple comparisons included.
+  stat_compare_means(label = "p.signif", method = "wilcox.test", paired = FALSE, p.adjust = "BH", comparisons = list(c("Group 2_W8", "Group 3_W8"), c("Group 2_W18", "Group 3_W18")), label.y = c(7,8)) +
+  # compare same vaccine group but different timepoint, paired wilcox.test. FDR correction for multiple comparisons included.
+  stat_compare_means(label = "p.signif", method = "wilcox.test", paired = TRUE, p.adjust = "BH", comparisons = list(c("Group 2_W8", "Group 2_W18"), c("Group 3_W8", "Group 3_W18"))) +
+  labs(x = "", y = "Mean % of VH SHM") +
+  personal_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.position = "none") 
+    
+
+ggsave(paste0("../", result.dir, "v-shm_byindiv_timepoint.pdf"),
+       width = 14, height = 14, 
+       units = "cm", limitsize = FALSE) 
+```
+
+## Somatic hypermutations integrated datasets
+
+Similar plot as above, but now the data shown are the integrated RABVG-specific sequences from the sanger sequencing and the bulk IgG repertoire sequencing. 
+
+```{r shm_sc_rep_seq}
+
+sc_rep_seq_per_animal <- sc_rep_seq %>%
+  filter(Group != "Group 1") %>%
+  mutate(Group = vac_group,
+         Group_timepoint = paste(Group, timepoint, sep = "_"),
+         Group_timepoint = factor(Group_timepoint, levels = c("Group 2_W8", "Group 2_W18", "Group 3_W8", "Group 3_W18"))) %>%
+  group_by(ID, Group, Group_timepoint) %>%
+  summarise(avg_SHM_sc = mean(V_SHM, na.rm = TRUE),
+            avg_SHM_rep_seq = mean(avg_V_SHM, na.rm = TRUE), 
+            avg_SHM_merged = sum(avg_SHM_sc, avg_SHM_rep_seq)/2) %>%
+  ungroup()
+
+# kruskal test
+res.kruskal <-  sc_rep_seq_per_animal %>% kruskal_test(avg_SHM_merged ~ Group_timepoint)
+#doing multiple comparisons afterwards, correcting by BH aka False Discovery Rate p.adjust.method, comparing all to the reference group. 
+# perform wilcox test between groups and paired analysis
+wilcox_result <- sc_rep_seq_per_animal %>% wilcox_test(avg_SHM_merged ~ Group_timepoint, paired = F, comparisons = list(c("Group 2_W8", "Group 2_W18"), c("Group 3_W8", "Group 3_W18"))) %>%
+  add_xy_position(x = "Group_timepoint")
+
+ggviolin(sc_rep_seq_per_animal, x = "Group_timepoint", y = "avg_SHM_merged", color = "Group") +
+  stat_summary(fun = "mean",
+               geom = "crossbar", 
+               width = 0.3,
+               colour = "black") +
+  geom_point(position = position_jitter(.1), alpha = 1, size = 3, shape = 21, aes(fill = Group)) +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  # compare different vaccine groups but same timepoint, not-paired wilcox.test, also called Mann-Whitney test. FDR correction for multiple comparisons included.
+  stat_compare_means(label = "p.signif", method = "wilcox.test", paired = FALSE, p.adjust = "BH", comparisons = list(c("Group 2_W8", "Group 3_W8"), c("Group 2_W18", "Group 3_W18")), label.y = c(7,8)) +
+  # compare same vaccine group but different timepoint, paired wilcox.test. FDR correction for multiple comparisons included.
+  stat_compare_means(label = "p.signif", method = "wilcox.test", paired = TRUE, p.adjust = "BH", comparisons = list(c("Group 2_W8", "Group 2_W18"), c("Group 3_W8", "Group 3_W18"))) +
+  labs(x = "", y = "Mean % of VH SHM") +
+  personal_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.position = "none") 
+    
+
+ggsave(paste0("../", result.dir, "v-shm_byindiv_timepoint_sc_repseq.pdf"),
+       width = 20, height = 15, 
+       units = "cm", limitsize = FALSE) 
+```
+
+
+# Comparison of HCDR3 length
+
+This code compares the length of HCDR3 regions between different groups using a density plot. The merged data frame is plotted using ggplot with the x-axis representing the number of amino acids in the CDR3 region, and the fill color representing the group. The resulting plot is then saved as a PDF file.
+
+```{r}
+merged_df %>%
+  ggplot(aes(nchar(cdr3_aa), fill = Group)) +
+  geom_density(color = "black", alpha = .7) +
+   theme_cowplot() +
+    labs(x = "CDR3 aa length", y = "Count", title = "") +
+  scale_fill_manual(values = colors)+
+  personal_theme +
+ theme(legend.position = "none")
+
+ggsave(paste0("../", result.dir, "cdr3-length.pdf"),
+       width = 17, height = 15, 
+       units = "cm", limitsize = FALSE) 
+```
+
+# Plotting trees 
+
+This chunk is used for plotting phylogenetic trees. It reads in multiple tree files, assigns names to them, and creates a list of trees. It also creates two color palettes, one for tree node labels and one for grouping variables.
+The code then performs multiple operations on each tree in the list. It assigns a data frame containing information about each sequence to the tree and uses it to label the tree nodes. It also adds a heatmap to the tree using the grouping variables, and saves the resulting plot to a file.
+Finally, it creates a new set of trees with different color schemes for the grouping variables and saves these plots to files as well.
+
+```{r tree_plotting}
+
+ls <- list.files("../data/phylogenetic_trees/", full.names = T, pattern = "*.tre")
+trees <- lapply(ls, treeio::read.tree)
+names(trees) <- lapply(ls, function (x) strsplit(x, "/")[[1]][[5]])
+
+
+
+colors_tree <- c("Ref. Site I" = "#FF40FF", "Ref. Site III" = "#00E9EB",
+                 "Group 1" = "#FF2600", "Group 2" = "#008F00", "Group 3" = "#011993")
+
+colors_tree_2 <- c("Ref. Site I" = "#FF40FF", "Ref. Site III" = "#00E9EB",
+                 "High SHM" = "#000000", 
+                 "Medium SHM" = "#898989",
+                 "Low SHM" = "#C8C8C8")
+
+rabies_df <- merged_mab_info %>%
+  mutate(site = case_when(grepl("Ref", Group) ~ Group,
+                          grepl("Med", mAb) ~ "Medium SHM",
+                          grepl("High", mAb) ~ "High SHM",
+                          grepl("Low", mAb) ~ "Low SHM", 
+                          TRUE ~ ""),
+         Group = as.character(Group)) %>%
+  select(sequence_id, Group, mAb, site) %>%
+  as.data.frame() %>%
+  left_join(merged_df, by = c("sequence_id", "Group")) %>%
+  mutate(v_call_family = substr(v_call, 1,5)) %>%
+  select(sequence_id, Group, mAb, site, v_call_family)
+
+rownames(rabies_df) <- rabies_df[,"sequence_id"]
+
+for(i in seq_along(trees)){
+  tree <- ggtree(trees[[i]]) %<+% rabies_df +
+    geom_tiplab(aes(label = mAb), align = FALSE) + 
+    geom_treescale()
+  
+  tree <- gheatmap(tree, rabies_df["Group"], width = .1, offset = .1) +
+    scale_fill_manual(values = colors_tree) +
+    theme(legend.position = c(0.7, 0.2)) +
+    labs(fill = "", color = "")
+  
+  ggsave(plot = tree, filename = paste0("../", result.dir,Sys.Date(),names(trees)[[i]], ".pdf"), width = 15, height = 29)
+
+  # to create slanted trees as well
+  
+  tree_2 <- ggtree(trees[[i]], layout = "equal_angle") %<+% rabies_df +
+    geom_tiplab(aes(label = mAb), hjust = -.1) + 
+    geom_tippoint(aes(color = site), size = 4) +
+    scale_color_manual(values = colors_tree_2, na.value = "#ffffff00")+
+    geom_treescale(width = .2) +
+    labs(color = "") +
+    theme_tree(text=element_text(family = "Helvetica"))
+
+  ggsave(plot = tree_2, filename = paste0("../", result.dir,Sys.Date(),names(trees)[[i]], "slanted_tree.pdf"),device = "pdf", width = 20, height = 20)
+}
+
+{
+  color_groups_tree <- list(c( "Group 1" = "#FF2600", 
+                               "Group 2" = "grey90",
+                               "Group 3" = "grey90"),
+                            c( "Group 1" = "grey90", 
+                               "Group 2" = "#008F00",
+                               "Group 3" = "grey90"),
+                            c( "Group 1" = "grey90", 
+                               "Group 2" = "grey90",
+                               "Group 3" = "#011993"),
+                            c( "Group 1" = "grey90", 
+                               "Group 2" = "grey90",
+                               "Group 3" = "grey90"))
+  
+  for (i in seq_along(color_groups_tree)){
+    colors_tree_3 <- c("Ref. Site I" = "#FF40FF", "Ref. Site III" = "#00E9EB",
+                 "High SHM" = "#000000", 
+                 "Medium SHM" = "#898989",
+                 "Low SHM" = "#C8C8C8", color_groups_tree[[i]])
+    if(i %in% c(1:3)){
+      tree_new <- ggtree(trees[[1]], aes(color = Group),layout = "ape") %<+% rabies_df +
+        geom_tiplab(aes(label = mAb), hjust = -.1) + 
+        geom_tippoint(aes(subset=site %in% c("Ref. Site I", "Ref. Site III","High SHM","Medium SHM","Low SHM"),color = site), size = 2) +
+        scale_color_manual(values = colors_tree_3, na.value = "#000000") +
+        geom_treescale() +
+        labs(color = "") +
+        xlim_expand(3.7, NA) 
+      print(tree_new)
+    }else{
+      tree_new <- ggtree(trees[[1]], aes(color = Group),layout = "ape") %<+% rabies_df +
+        #scale_color_npg(na.value = "#000000")+
+        geom_tippoint(aes(subset=site %in% c("Ref. Site I", "Ref. Site III","High SHM","Medium SHM","Low SHM"),color = site), size = 2) +
+        scale_color_manual(values = colors_tree_3, na.value = "#000000") +
+        geom_treescale() +
+        labs(color = "") +
+        xlim_expand(3.7, NA) 
+      print(tree_new)
+    }
+      
+    ggsave(tree_new, filename = paste0("../",result.dir,"phylo_tree_group",i,".pdf"))
+  }
+}
+
+
+```
+
+
+# Clonotypes comparisons
+
+## Clonotypes single-cell data
+
+This code creates a stacked bar plot of single-cell clone size by animal ID, with clonotype size represented by fill color. It also includes text labels for the total number of sequences for each animal ID and saves the plot as a PDF file. The plot is faceted by vaccination group.
+
+```{r clonotypes_animal}
+clone_summary %>%
+  ggplot(aes(x = ID, y = clone_size, group = grp, fill = clone_size)) +
+  geom_bar(position="stack", stat="identity", color = "black") +
+  scale_fill_viridis_c() +
+  labs(x = "Animal ID", y = "# sequences", fill = "Clonotype size") +
+  stat_summary(fun.y = sum, aes(label = after_stat(y), group = ID), geom = "text", vjust = -.2) +
+  theme_classic() +
+  personal_theme + 
+  facet_wrap(~vac_group, scales = "free_x")
+
+ggsave(filename = paste0("../", result.dir,"clonotypes_per_animal.pdf"),device = "pdf", width = 7, height = 6)
+```
+
+## Clonotypes bulk IgG repertoire data
+
+This code creates a similar stacked bar plot as shown above but for the IgG repertoire antigen-specific sequencing data. This was achieved by performing lineage tracing using the `clonoquery module` in IgDiscover. No sequences in Group 1 were detected, probably due to low numbers of antigen-specific sequences used to query the bulk dataset.
+
+```{r rep_seq}
+
+rep_seq %>%
+  filter(vac_group != "Group 1") %>%
+  ggplot(aes(x = animal_ID, y = size, group = desc(size), fill = size)) +
+  geom_bar(position="stack", stat="identity", color = "black") +
+  scale_fill_viridis_c() +
+  labs(x = "Animal ID", y = "# sequences", fill = "Clonotype size") +
+  stat_summary(fun.y = sum, aes(label = after_stat(y), group = animal_ID), geom = "text", vjust = -.2) +
+  theme_classic() +
+  personal_theme + 
+  facet_wrap(~vac_group, scales = "free_x")
+
+ggsave(filename = paste0("../", result.dir,"clonotypes_per_animal_rep_seq.pdf"),
+       device = "pdf", width = 7, height = 6)
+```
+
+## Clonotypes integrated datasets
+
+Finally, the plot presented in the main figure of the paper, showing the merged dataset. This code creates a similar stacked bar plot as shown above but for the combined RABVG-specific Sanger sequences and the lineage-traced IgG repertoire sequences. 
+
+```{r }
+
+sc_rep_seq_summary %>%
+  filter(Group != "Group 1") %>%
+  ggplot(aes(x = ID, y = clonal_size_merged, group = desc(clonal_size_merged), fill = clonal_size_merged)) +
+  geom_bar(position="stack", stat="identity", color = "black") +
+  scale_fill_viridis_c() +
+  labs(x = "Animal ID", y = "# sequences", fill = "Clonotype size") +
+  stat_summary(fun.y = sum, aes(label = after_stat(y), group = ID), geom = "text", vjust = -.2) +
+  theme_classic() +
+  personal_theme + 
+  facet_wrap(~Group, scales = "free_x")
+
+ggsave(filename = paste0("../", result.dir,"clonotypes_per_animal_sc_rep_seq.pdf"),
+       device = "pdf", width = 7, height = 6)
+ 
+
+```
+
+
+# HV and HJ alleles usage integrated data
+
+## Read total IgG bulk repertoire
+
+The code reads large processed TSV files containing immune repertoire data, removes unwanted data, and subsamples each animal's data to 100,000 sequences. 
+
+```{r read_and_subsample, eval=FALSE}
+# Read large tsv files with processed (IgBlast/IgDiscover) VDJ sequences
+ls_tabs <- list.files("../data/processed_data/rep_seq/", pattern = "filtered.tsv.gz", recursive = TRUE, full.names = TRUE)
+names(ls_tabs) <- substr(list.files("../data/processed_data/rep_seq/", pattern = "filtered.tsv.gz", recursive = TRUE), 1,3)
+# Remove tabs from group 1, not used
+group_1_remove <- c("I01","I04","I08","I11","I12","I15")
+ls_tabs_filt <- ls_tabs[!names(ls_tabs) %in% group_1_remove]
+tabs_bulk <- lapply(ls_tabs_filt, data.table::fread, quote = FALSE, verbose = FALSE, nThread = 8, header = TRUE, sep = "\t") 
+tabs_bulk <- data.table::rbindlist(tabs_bulk, idcol = "animal_ID")
+
+# Subsample to 100000 sequences for each animal
+{
+  set.seed(123)
+  tabs_subsample <- tabs_bulk %>%
+    group_by(animal_ID) %>%
+    slice_sample(n = 100000, replace = FALSE) %>% ungroup()
+  data.table::fwrite(tabs_subsample, "../data/processed_data/rep_seq/subsampled_per_animal.tsv.gz" ,sep = "\t", nThread = 8)
+  rm(tabs_bulk)
+  gc()
+}
+
+```
+
+## Heatmap HV
+
+Creates a heatmap to display HV allele frequencies for each animal and group, using a log10 scale to account for differences in sequencing depth between groups. The resulting plot displays the frequency of each HV allele in each animal's repertoire. The order of the groups is manually set to aid in interpretation.
+
+```{r v_j_pairing_data}
+
+empty_matrix <- matrix(nrow = length(names_j), ncol = length(names_v))
+colnames(empty_matrix) <- names_v
+rownames(empty_matrix) <- names_j
+
+tabs_subsample_summary <- tabs_subsample %>%
+  mutate(j_call = sub("\\*.*| ","",j_call),
+           v_call = sub("\\*.*| ","", v_call)) %>%
+  group_by(v_call, j_call, animal_ID) %>%
+  summarise(n = n()) %>%
+  ungroup() 
+
+tabs_bulk_summary <- rep_seq_stat %>% 
+  mutate(animal_ID = ID,
+         total_rep_seq = assignment_filtering.has_cdr3)
+
+df_heatmap <- sc_rep_seq %>% 
+     mutate(j_call = sub("\\*.*| ","",j_call),
+           v_call = sub("\\*.*| ","", v_call),
+           animal_ID = ID) %>%
+  group_by(v_call, j_call, Group, animal_ID) %>%
+  summarise(n = sum(n(), size,na.rm = T)) %>%
+  ungroup() %>%
+  bind_rows(tabs_subsample_summary) %>%
+  mutate(Group = tidyr::replace_na(Group, "Total IgG")) %>%
+  left_join(tabs_bulk_summary, by = "animal_ID") %>%
+  mutate(n = tidyr::replace_na(n, 0),
+         total_rep_seq = ifelse(Group == "Total IgG", 100000, total_rep_seq)) %>%
+  drop_na() %>%
+  group_by(Group) %>%
+  mutate(
+    freq= log10(ifelse(Group == "Total IgG", n/total_rep_seq, n/sum(n)))) %>%
+  ungroup()
+
+to_order <- c( "I18_Group 2", "I17_Group 2", "I13_Group 2", "I06_Group 2", "I05_Group 2", "I02_Group 2", "I16_Group 3", "I14_Group 3", "I10_Group 3", "I09_Group 3", "I07_Group 3", "I03_Group 3", "I18_Total IgG", "I17_Total IgG", "I13_Total IgG", "I06_Total IgG", "I05_Total IgG", "I02_Total IgG", "I16_Total IgG", "I14_Total IgG", "I10_Total IgG", "I09_Total IgG", "I07_Total IgG", "I03_Total IgG")
+
+df_heatmap %>%
+  filter(Group != "Group 1") %>%
+  group_by(v_call, Group, animal_ID, total_rep_seq) %>%
+  summarise(n = sum(n)) %>%
+  ungroup() %>% 
+  group_by(Group) %>%
+  mutate(
+    freq= log10(ifelse(Group == "Total IgG", n/total_rep_seq, n/sum(n)))) %>%
+  ungroup() %>%
+  mutate(v_call = forcats::fct_reorder(.f = v_call, .x = freq, .fun = mean, .desc = TRUE, na.rm = TRUE),
+         group_ID = paste(animal_ID, Group, sep = "_"),
+         group_ID = factor(group_ID, levels = to_order)) %>%
+  ggplot(aes(v_call, group_ID, fill = freq)) +
+  geom_tile(color = "black") +
+  scale_fill_viridis_c(option = "mako", direction = -1) +
+  theme(axis.text.x = element_text(angle = 90, size = 7, hjust = 1, vjust = 0.5, face = "bold", colour = "black"),
+        axis.text.y = element_text(face = "bold", colour = "black"),
+        strip.background = element_rect(color="black", fill="grey90", size=.8, linetype="solid"),
+        strip.text = element_text(face = "bold"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect("white"),
+        legend.position =  "top") +
+  labs(x = "IGHV genes", y = "Animal ID",  fill = "HV gene usage\nfrequency (log10)") +
+  facet_wrap(~Group, ncol = 1, scales = "free_y") 
+
+ggsave(paste0("../", result.dir, "V_gene_usage_sc_rep_seq.pdf"), 
+       dpi = 300, width = 29,height = 14, units = "cm" ,
+       limitsize = FALSE) 
+  
+```
+
+## Heatmap HV-HJ pairing
+
+Plot a similar heatmap as above but instead of the rows being the individual animals, the rows are HJ alleles. Thus, the data for each animal is combined in this plot to show the most common HV-HJ pairing.
+
+```{r heatmap_hv_hj}
+
+df_heatmap %>%
+    mutate(Group = factor(Group, levels = c("Group 2", "Group 3", "Total IgG")),
+         v_call = forcats::fct_reorder(.f = v_call, .x = freq, .fun = mean, .desc = TRUE, na.rm = TRUE)) %>%
+  drop_na() %>%
+  ggplot(aes(v_call, j_call, fill = freq)) +
+  geom_tile(color = "black") +
+  scale_fill_viridis_c(option = "mako", direction = -1, na.value = "salmon")+
+  theme(axis.text.x = element_text(angle = 90, size = 7, hjust = 1, vjust = 0.5, face = "bold", colour = "black"),
+        axis.text.y = element_text(face = "bold", colour = "black"),
+        strip.background = element_rect(color="black", fill="grey90", size=.8, linetype="solid"),
+        strip.text = element_text(face = "bold"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect("white"),
+        legend.position =  "top") +
+  labs(x = "IGHV genes", y = "IGHJ genes",  fill = "HV-HJ pairing\nfrequency (log)") +
+  facet_wrap(~Group, ncol = 1, scales = "free_y") 
+
+ggsave(paste0("../", result.dir, "V-J_pairing_sc_rep_seq.pdf"), 
+       dpi = 300, width = 29,height = 14, units = "cm" ,
+       limitsize = FALSE) 
+
+```
+
+# Clonotype diversity
+
+## Processing data for diversity estimation
+
+This chunk defines two functions: `chaox100` and `extract_and_order`. The first function calculates the chao1 estimator of clonotype richness 100 times on a subsample of the input data. The second function extracts a column from a data frame, removes missing values, and orders the values in decreasing order. The code then saves clonal sizes for each individual, removes individuals with less than 20 sequences, and standardizes the data for input to `chao1` analysis.
+
+```{r processing_for_chao1}
+
+# Run chao1 100 times and collect the values
+chaox100 <- function(x){
+  replicate(100, {
+  subsample <-  rrarefy(x,min(rowSums(x)))
+  chao <- estimateR(subsample)
+  return(chao)
+  })}
+# Extract columns from df, remove NAs, and reorder based on decreasing value
+extract_and_order <- function(df, column) {
+  group <- df[[column]][!is.na(df[[column]])]
+  group <- group[order(group, decreasing = TRUE)]
+  return(group)
+}
+
+# Save as list the clonal size for each individual
+list_clonal_size <- list()
+for(i in unique(sc_rep_seq_summary$ID)){
+  list_clonal_size[[i]] <- sc_rep_seq_summary %>% filter(ID == i) %>% pull(clonal_size_merged)
+}
+
+# Remove individuals with less than 20 sequences since that sample size is too small, arbitrary number based on our sequencing depth
+  {
+    filt_ls_clonal_size <- list_clonal_size[lapply(list_clonal_size, function(x) sum(x)) > 20]
+  filt_ls_clonal_size_chao100x <- lapply(filt_ls_clonal_size, function(x) x[order(x, decreasing = TRUE)])
+  max_length <- do.call(max, lapply(filt_ls_clonal_size_chao100x, length))
+  
+  for(l in names(filt_ls_clonal_size_chao100x)){
+    length(filt_ls_clonal_size_chao100x[[l]]) <- max_length
+  }
+  list_names <- names(filt_ls_clonal_size_chao100x)
+  filt_ls_clonal_size_chao100x <- lapply(filt_ls_clonal_size_chao100x, as.data.frame)
+  filt_ls_clonal_size_chao100x <- do.call(cbind, filt_ls_clonal_size_chao100x)
+  colnames(filt_ls_clonal_size_chao100x) <- list_names
+  input_chao <- as.data.frame(t(filt_ls_clonal_size_chao100x))
+  input_chao[is.na(input_chao)] <- 0
+}
+
+```
+
+## Diversity using iNEXT x100 times
+
+The second code chunk defines the function inextx100 that calculates the iNEXT estimator of clonotype diversity 100 times on a subsample of the input data. The code then applies the inextx100 function to the data, groups the results by animal ID and clonotype order, and computes the average estimator for each group. The results are plotted using ggplot2, with boxplots and points representing the distribution of estimator values, and the stat_compare_means function to compare the means between two groups. The resulting plot is saved as a PDF file.
+
+```{r diversity_iNEXT}
+inextx100 <- function(x, level, subsampling){
+  inext_D <- list()
+  replicate(100, {
+  subsample <- rrarefy(unlist(x), subsampling)
+  subsample <-  subsample[order(subsample, decreasing = T)]
+  inext_D[[i]] <- estimateD(subsample, q = c(0,1,2), datatype = "abundance", base = "size", level = level, nboot = 0)
+  return(inext_D)})
+}
+
+inext_obj <- lapply(filt_ls_clonal_size, inextx100, level = NULL, subsampling = 24)
+inext_obj <- lapply(inext_obj, data.table::rbindlist)
+inext_rep_100 <- data.table::rbindlist(inext_obj, idcol = TRUE, fill = TRUE) %>%
+  mutate(animal_ID = .id,
+         Group = plyr::mapvalues(animal_ID, from = c("I01","I08","I11","I12","I15", "I02", "I05", "I06","I13", "I17", "I18", "I03", "I07", "I09","I10", "I14", "I16"), to = c("Group 1","Group 1","Group 1","Group 1","Group 1","Group 2","Group 2","Group 2","Group 2","Group 2","Group 2","Group 3","Group 3","Group 3","Group 3","Group 3","Group 3"))) %>%
+  group_by(animal_ID, Group, Order.q) %>%
+  summarise(avg_estimator = mean(qD))
+
+inext_rep_100 %>%
+  write.csv(paste0("../", result.dir,"diversity_per_animal.csv"), row.names = FALSE)
+
+inext_rep_100 %>%
+  filter(Group != "Group 1") %>%
+  mutate(Order.q = plyr::mapvalues(Order.q, from = c(0,1,2), to = c("Clonotype richness", "Shannon diversity", "Simpson diversity"))) %>%
+  ggplot(aes(Group, avg_estimator, group = Group, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, aes(middle = mean(avg_estimator))) +
+  geom_point(position = position_jitter(.2), size = 3) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", comparisons = list(c("Group 3", "Group 2")), paired = FALSE, label.y = c(50)) +
+  scale_fill_manual(values=colors) +
+  theme_classic() +
+  personal_theme +
+  labs(y = "Estimator\n(100x mean)", x = "") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  facet_wrap(~Order.q)
+
+ggsave(filename = paste0("../", result.dir,"hill_numbers_sc_repseq.pdf"),device = "pdf", width = 10, height = 8)
+
+```
+
+## Clonotype richnes (Chao1)
+
+Filters and plots the clonotype richness of groups 2 and 3 while comparing them statistically using the Wilcoxon test. The resulting boxplot shows the median, quartiles, and distribution of the estimator values for each group, along with individual data points. The x-axis shows the group names, while the y-axis displays the estimator values. The title of the plot is "Clonotype richness (Chao1)", and the y-axis label is "Estimator". The resulting plot is saved as a PDF file 
+
+```{r}
+ inext_rep_100 %>%
+  filter(Order.q == 0, Group != "Group 1") %>%
+  ggplot(aes(Group, avg_estimator, group = Group, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, aes(middle = mean(avg_estimator))) +
+  geom_point(position = position_jitter(.2), size = 3) +
+  theme_cowplot() +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", comparisons = list(c("Group 3", "Group 2")), paired = FALSE, label.y = c(40)) +
+  labs(title = "Clonotype richness (Chao1)", y = "Estimator") +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values=colors) +
+  personal_theme
+
+ggsave(filename = paste0("../", result.dir,"chao_1_sc_repseq.pdf"),device = "pdf", width = 10, height = 8)
+
+```
+
+## Sample coverage per group
+
+This code calculates the sample coverage for groups 2 and 3 and plots the results using the `iNEXT` package. The resulting plot shows the sample coverage on the x-axis and the number of sequences on the y-axis.
+
+The resulting plot is saved as a PDF file.
+
+```{r sample_coverage}
+
+filt_df_clonal_size  <- data.table::rbindlist(lapply(filt_ls_clonal_size, as.data.frame), idcol = TRUE) %>%
+  mutate(Group = plyr::mapvalues(.id, from = c("I01","I08","I11","I12","I15", "I02", "I05", "I06","I13", "I17", "I18", "I03", "I07", "I09","I10", "I14", "I16"), to = c("Group 1","Group 1","Group 1","Group 1","Group 1","Group 2","Group 2","Group 2","Group 2","Group 2","Group 2","Group 3","Group 3","Group 3","Group 3","Group 3","Group 3")), 
+         value = `X[[i]]`) %>%
+  tibble::rownames_to_column("rownames") %>%
+  tidyr::pivot_wider(names_from = Group, values_from = value) %>%
+  select(-c(rownames, `X[[i]]`, `.id`))
+
+group_2 <- extract_and_order(filt_df_clonal_size , "Group 2")
+group_3 <- extract_and_order(filt_df_clonal_size , "Group 3")
+list_test <- list("Group 2" = group_2,"Group 3" = group_3)  
+
+inext_obj <- iNEXT(list_test, q=c(0), datatype = "abundance", endpoint = 1500)
+
+ggiNEXT(inext_obj, type=2, se=TRUE, facet.var="None", color.var="Assemblage", grey=FALSE)  +
+  theme_cowplot() +
+  labs(title = "Sample coverage", x = "Number of sequences") +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values=colors) +
+  personal_theme
+
+ggsave(filename = paste0("../", result.dir,"sample_coverage_sc_repseq.pdf"),device = "pdf", width = 10, height = 8)
+
+```
+
+## Take environment snapshot 
+```{r eval=FALSE}
+renv::snapshot()
+```
+
+
+## SessionInfo
+```{r}
+sessionInfo()
+```
+
+
