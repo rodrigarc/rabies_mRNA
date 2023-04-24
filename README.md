@@ -49,8 +49,8 @@ To rerun the analysis, please clone this repo and check the required programs ab
 cd ~/Desktop
 # clone this repo for the most updated code
 git clone https://github.com/rodrigarc/rabies_mRNA
-# download the necessary processed data presend in the zenodo repo
-# download via browser searching for 7680334 acession on zenodo or use curl/wget on the terminal
+# download the necessary processed data present in the zenodo repo
+# download via browser searching for 7680334 acession on zenodo website or use curl/wget on the terminal
 wget -O rabies_mRNA.zip "https://zenodo.org/record/7680334/files/repo_to_zenodo_0-9-0.zip?download=1"
 # unzip the repository using your preferred unzipper
 unzip rabies_mRNA.zip
