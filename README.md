@@ -1,4 +1,4 @@
-## Unmodified mRNA vaccine encoding rabies virus glycoprotein induces stronger immunity compared to a licensed vaccine in macaques
+## Unmodified rabies mRNA vaccine elicits high cross-neutralizing antibodies and diverse B cell memory responses
 
 Fredrika Hellgren‡, Alberto Cagigi,3‡, Rodrigo Arcoverde Cerveira‡, Sebastian Ols, Theresa Kern, Ang Lin, Bengt Eriksson, Michael G Dodds, Edith Jasny, Kim Schwendt, Conrad Freuling, Thomas Müller, Martin Corcoran, Gunilla B. Karlsson Hedestam, Benjamin Petsch and Karin Loré**
 
@@ -17,7 +17,7 @@ Fredrika Hellgren‡, Alberto Cagigi,3‡, Rodrigo Arcoverde Cerveira‡, Sebast
 
 ## Abstract
 
-Licensed rabies virus vaccines based on whole inactivated virus are effective in humans, but a detailed investigation of the elicited immune response and whether it can be improved with more recently developed vaccine platforms is lacking. Here we show that two doses of a lipid nanoparticle-formulated unmodified mRNA vaccine encoding the rabies virus glycoprotein (RABV-G) induces higher levels of RABV-G specific plasmablasts, memory B cells and T cells in blood, and plasma cells in the bone marrow compared to two doses of Rabipur in non-human primates. The mRNA vaccine also generates higher RABV-G binding and neutralizing antibody titers than Rabipur, while the degree of somatic hypermutation and clonal diversity of the response are similar for the two vaccines. The higher overall antibody titers induced by the mRNA vaccine translates into improved cross-neutralization of related lyssavirus strains, suggesting that this platform has potential for the development of a broadly protective vaccine against these viruses.
+Licensed rabies virus vaccines based on whole inactivated virus are effective in humans. However, there is a lack of detailed investigations of the elicited immune response, and whether responses can be improved with novel vaccine platforms is lacking. Here we show that two doses of a lipid nanoparticle-formulated unmodified mRNA vaccine encoding the rabies virus glycoprotein (RABV-G) induces higher levels of RABV-G specific plasmablasts, memory B cells and T cells in blood, and plasma cells in the bone marrow compared to two doses of Rabipur in non-human primates. The mRNA vaccine also generates higher RABV-G binding and neutralizing antibody titers than Rabipur, while the degree of somatic hypermutation and clonal diversity of the response are similar for the two vaccines. The higher overall antibody titers induced by the mRNA vaccine translates into improved cross-neutralization of related lyssavirus strains, suggesting that this platform has potential for the development of a broadly protective vaccine against these viruses.
 
 ## General information
 
