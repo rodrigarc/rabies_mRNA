@@ -21,12 +21,12 @@ Licensed rabies virus vaccines based on whole inactivated virus are effective in
 
 ## General information
 
-This repository contains all the code used for sequence analysis performed to process and compare B cell receptors between the vaccinated groups. If you want to just check the code and plots without having to rerun all the analysis, just check our deployed [website by clicking HERE](https://rodrigarc.github.io/rabies_mRNA/results/lab_book/bcr-repertoire-analysis.html). If you want to have access to the processed dataset to rerun the entire analysis, download it from our [Zenodo repo](doi.org/10.5281/zenodo.7680334).
+This repository contains all the code used for sequence analysis performed to process and compare B cell receptors between the vaccinated groups. If you want to just check the code and plots without having to rerun all the analysis, just check our deployed [website by clicking HERE](https://rodrigarc.github.io/rabies_mRNA/results/lab_book/bcr-repertoire-analysis.html). If you want to have access to the processed dataset to rerun the entire analysis, download it from our [Zenodo repo](https://zenodo.org/record/7680334).
 
 ## Preprocessing dataset
 
 The preprocessing was done using IgDiscover (v. 0.15.1) but the raw reads are not included here. The raw data is available on NCBI Bioproject [PRJNA932987](https://www.ncbi.nlm.nih.gov/bioproject/932987). 
-The raw reads were aligned to the [KIMDB *Macaca mulatta* database](http://kimdb.gkhlab.se/datasets/) and the clonotype assignment were also generated using IgDiscover. The clonotype definition is identical IGHV-IGHJ-HCDR3 length, at least one of the junctions is the same, and 80% HCDR3 amino acid identity. The bash script and comments on how to use it can be found here `src/run_clonotypes_loop.sh`. The HVDJ amino acid multiple sequence alignments were done using MUSCLE (v 5.1) using default seetings. The resulting alignments were used as input to Fasttree (v 2.1.1), the generalized time-reversible model was used to infer the phylogenetic trees. The bash script for this with the the parameters used to run can be found in `src/run_muscle_and_fasttree.sh`. The raw Sanger sequencing files (.ab1 files) from RABV-G specific single-cell sorted B cells are deposited here and were processed using the [Scifer R/bioconductor package](doi.org/10.18129/B9.bioc.scifer). The Sanger sequences were processed the same way as the raw reads, using IgDiscover. The antigen-specific lineage tracing per animal was done using the `clonoquery module` within IgDiscover. A sample code on how it was run is available at `src/run_clonoquery.sh`.
+The raw reads were aligned to the [KIMDB *Macaca mulatta* database](http://kimdb.gkhlab.se/datasets/) and the clonotype assignment were also generated using IgDiscover. The clonotype definition is identical IGHV-IGHJ-HCDR3 length, at least one of the junctions is the same, and 80% HCDR3 amino acid identity. The bash script and comments on how to use it can be found here `src/run_clonotypes_loop.sh`. The HVDJ amino acid multiple sequence alignments were done using MUSCLE (v 5.1) using default seetings. The resulting alignments were used as input to Fasttree (v 2.1.1), the generalized time-reversible model was used to infer the phylogenetic trees. The bash script for this with the the parameters used to run can be found in `src/run_muscle_and_fasttree.sh`. The raw Sanger sequencing files (.ab1 files) from RABV-G specific single-cell sorted B cells are deposited here and were processed using the [Scifer R/bioconductor package](http://doi.org/10.18129/B9.bioc.scifer). The Sanger sequences were processed the same way as the raw reads, using IgDiscover. The antigen-specific lineage tracing per animal was done using the `clonoquery module` within IgDiscover. A sample code on how it was run is available at `src/run_clonoquery.sh`.
 
 ## Repository structure
  - `src` folder: contains all the source code used for the preprocessing and analysis of the B cell receptors.
@@ -41,15 +41,21 @@ To rerun the analysis and generate plots, it is required for you to have the fol
  - RStudio (2022.12.0+353)
  - renv (0.16.0)
  
-To rerun the analysis, please clone this repo and check the required programs above. The processed datasets are available at our [Zenodo repo](doi.org/10.5281/zenodo.7680334). After that, open the `rabies_mRNA.Rproj` file and restore the environment. Then, knit the `clonotype_analysis.Rmd` and all the plots should be generated. 
+To rerun the analysis, please clone this repo and check the required programs above. The processed datasets are available at our [Zenodo repo](https://zenodo.org/record/7680334). After that, open the `rabies_mRNA.Rproj` file and restore the environment. Then, knit the `clonotype_analysis.Rmd` and all the plots should be generated. 
 
 
 ```
-# select a location to reproduce this analysis in your computer
+# select a location to reproduce this analysis in your computer using the terminal
 cd ~/Desktop
-# clone this repo
+# clone this repo for the most updated code
 git clone https://github.com/rodrigarc/rabies_mRNA
-# Open the Rproj within Rstudio (double click on Rproj if RStudio is installed)
+# download the necessary processed data presend in the zenodo repo
+# download via browser searching for 7680334 acession on zenodo or use curl/wget on the terminal
+wget -O rabies_mRNA.zip "https://zenodo.org/record/7680334/files/repo_to_zenodo_0-9-0.zip?download=1"
+# unzip the repository using your preferred unzipper
+unzip rabies_mRNA.zip
+
+# Open the Rproj downloaded (rabies_mRNA.Rproj) within Rstudio (double click on Rproj if RStudio is installed)
 # Restore environment using renv on the R console within RStudio
 renv::restore()
 
