@@ -1,4 +1,5 @@
-## Unmodified rabies mRNA vaccine elicits high cross-neutralizing antibodies and diverse B cell memory responses
+## Unmodified rabies mRNA vaccine elicits high cross-neutralizing antibody titers and diverse B cell memory responses
+
 
 Fredrika Hellgren‡, Alberto Cagigi,3‡, Rodrigo Arcoverde Cerveira‡, Sebastian Ols, Theresa Kern, Ang Lin, Bengt Eriksson, Michael G Dodds, Edith Jasny, Kim Schwendt, Conrad Freuling, Thomas Müller, Martin Corcoran, Gunilla B. Karlsson Hedestam, Benjamin Petsch and Karin Loré**
 
