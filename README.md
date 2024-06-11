@@ -67,7 +67,7 @@ knitr::render("src/clonotype-analysis.Rmd")
 
 ```
 
-## Plots and rendered results
+## [Plots and rendered results](https://rodrigarc.github.io/rabies_mRNA/results/lab_book/bcr-repertoire-analysis.html)
 
 All the plots will be generated under a `results` folder under a date folder (eg. `results/2023-02-10`) automatically created. The Rmarkdown file is rendered to html and contains the information regarding the type of analysis and its code used to generate all plots. A rendered version is already online and uploaded under `results/lab_book/` if you wish to just check the code used for each plot. The rendered `html` containing the code and analysis can be accessed [HERE](https://rodrigarc.github.io/rabies_mRNA/results/lab_book/bcr-repertoire-analysis.html). The QC from the antigen-specificsanger sequences can be found [here](https://rodrigarc.github.io/rabies_mRNA/results/lab_book/template_all_HC.html).
 
